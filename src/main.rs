@@ -1,6 +1,10 @@
+mod token;
 mod lexer;
+mod ast;
+mod parser;
 
 use lexer::Lexer;
+use parser::Parser;
 use std::io;
 use std::io::Write;
 
@@ -14,8 +18,8 @@ fn main() {
         io::stdout().flush().unwrap(); 
         match io::stdin().read_line(&mut input) {
             Ok(_) => {
-                for token in Lexer::new(&input) {
-                    println!("{:?}", token);
+                for stmt in Parser::new(Lexer::new(&input)) {
+                    println!("{:?}", stmt);
                 }
             }
             Err(_) => continue,
