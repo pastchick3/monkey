@@ -3,6 +3,7 @@ use crate::lexer::Lexer;
 use crate::ast::Expression;
 use crate::ast::Statement;
 
+// Precedence table.
 const LOWEST: u8 = 0;
 const EQUALS: u8 = 1;    // ==
 const LESSGREATER: u8 = 2;    // < or >
@@ -14,7 +15,6 @@ const CALL: u8 = 6;    // function()
 pub struct Parser {
     input: Vec<Token>,
     pos: usize,
-    next_pos: usize,
 }
 
 impl Parser {
@@ -23,7 +23,6 @@ impl Parser {
         Parser {
             input,
             pos: 0,
-            next_pos: 1,
         }
     }
 
@@ -37,10 +36,32 @@ impl Parser {
 
     fn forward(&mut self) -> () {
         self.pos += 1;
-        self.next_pos += 1;
     }
 
-    fn parse_statement(&mut self) -> Option<Result<Statement, String>> {
+    fn assert_and_forward(&mut self, expected: &str) -> String {
+        // Assert the current token is of the expected type, then move forward, and
+        // finally return this token.
+        match self.token() {
+            Some(tk) => {
+                let s = format!("{:?}", tk);
+                let n = match s.find('(') {
+                    Some(n) => n,
+                    None => panic!("Invalid Token {:?}", tk),
+                };
+                let name = &s[0..n];    // type
+                let value = &s[n+2..s.len()-2];    // value with () and "" stripped
+                if expected == name {
+                    self.forward();
+                    String::from(value)
+                } else {
+                    panic!(format!("Expect Token::{}, get {:?}.", expected, tk));
+                }
+            },
+            None => panic!(format!("Expect Token::{}, get EOF.", expected)),
+        }
+    }
+
+    fn parse_statement(&mut self) -> Option<Statement> {
         match self.token() {
             Some(Token::Let(_)) => Some(self.parse_let_statement()),
             Some(Token::Return(_)) => Some(self.parse_return_statement()),
@@ -49,45 +70,31 @@ impl Parser {
         }
     }
 
-    fn parse_let_statement(&mut self) -> Result<Statement, String> {
+    fn parse_let_statement(&mut self) -> Statement {
         self.forward();
-        let ident = match self.token() {
-            Some(Token::Ident(ident)) => Ok(Expression::Ident(ident)),
-            tk => return Err(format!("Expect Token::Ident, get {:?}.", tk)),
-        };
-        self.forward();
-        match self.token() {
-            Some(Token::Assign(_)) => (),
-            tk => return Err(format!("Expect Token::Assign, get {:?}.", tk)),
-        };
-        self.forward();
+        let ident = Expression::Ident(self.assert_and_forward("Ident"));
+        self.assert_and_forward("Assign");
         let expr = self.parse_expression(LOWEST);
-        match self.token() {
-            Some(Token::Semicolon(_)) => self.forward(),
-            tk => return Err(format!("Expect Token::Semicolon, get {:?}.", tk)),
-        };
-        Ok(Statement::Let { ident, expr })
+        self.assert_and_forward("Semicolon");
+        Statement::Let { ident, expr }
     }
 
-    fn parse_return_statement(&mut self) -> Result<Statement, String> {
+    fn parse_return_statement(&mut self) -> Statement {
         self.forward();
         let expr = self.parse_expression(LOWEST);
-        match self.token() {
-            Some(Token::Semicolon(_)) => self.forward(),
-            tk => return Err(format!("Expect Token::Semicolon, get {:?}.", tk)),
-        };
-        Ok(Statement::Return(expr))
+        self.assert_and_forward("Semicolon");
+        Statement::Return(expr)
     }
 
-    fn parse_expr_statement(&mut self) -> Result<Statement, String> {
+    fn parse_expr_statement(&mut self) -> Statement {
         let expr = self.parse_expression(LOWEST);
         if let Some(Token::Semicolon(_)) = self.token() {
             self.forward();
         }
-        Ok(Statement::Expr(expr))
+        Statement::Expr(expr)
     }
 
-    fn parse_expression(&mut self, precedence: u8) -> Result<Expression, String> {
+    fn parse_expression(&mut self, precedence: u8) -> Expression {
         let mut expr = self.parse_prefix();
         while precedence < self.get_precedence(self.token()) {
             expr = self.parse_infix(expr.clone());
@@ -110,98 +117,54 @@ impl Parser {
         }
     }
 
-    fn parse_prefix(&mut self) -> Result<Expression, String> {
-        match self.token().unwrap() {
-            Token::Ident(ident) => {
-                self.forward();
-                Ok(Expression::Ident(ident))
-            },
-            Token::Int(int) => {
-                self.forward();
-                Ok(Expression::Int(int))
-            },
-            Token::True(v) | Token::False(v) => {
-                self.forward();
-                Ok(Expression::Bool(v))
-            },
-            Token::Minus(operator) | Token::Bang(operator) => {
-                self.forward();
-                let expr = match self.parse_expression(PREFIX) {
-                    Ok(expr) => Ok(Box::new(expr)),
-                    Err(s) => Err(s),
-                };
-                Ok(Expression::Prefix {
-                    operator,
-                    expr,
-                })
+    fn parse_prefix(&mut self) -> Expression {
+        let ch = self.token().unwrap();
+        self.forward();
+        match ch {
+            Token::Ident(ident) => Expression::Ident(ident),
+            Token::Int(int) => Expression::Int(int),
+            Token::True(v) | Token::False(v) => Expression::Bool(v),
+            Token::Minus(op) | Token::Bang(op) => Expression::Prefix {
+                operator: op,
+                expr: Box::new(self.parse_expression(PREFIX)),
             },
             Token::Lparen(_) => {
-                self.forward();
                 let expr = self.parse_expression(LOWEST);
-                match self.token() {
-                    Some(Token::Rparen(_)) => self.forward(),
-                    tk => return Err(format!("Expect Token::Rparen, get {:?}.", tk)),
-                };
+                self.assert_and_forward("Rparen");
                 expr
             },
             Token::If(_) => {
-                self.forward();
-                match self.token() {
-                    Some(Token::Lparen(_)) => self.forward(),
-                    tk => return Err(format!("Expect Token::Lparen, get {:?}.", tk)),
-                };
-                let condition = match self.parse_expression(LOWEST) {
-                    Ok(expr) => Ok(Box::new(expr)),
-                    Err(s) => Err(s),
-                };
-                match self.token() {
-                    Some(Token::Rparen(_)) => self.forward(),
-                    tk => return Err(format!("Expect Token::Rparen, get {:?}.", tk)),
-                };
-                match self.token() {
-                    Some(Token::Lbrace(_)) => self.forward(),
-                    tk => return Err(format!("Expect Token::Lbrace, get {:?}.", tk)),
-                };
+                self.assert_and_forward("Lparen");
+                let condition = self.parse_expression(LOWEST);
+                self.assert_and_forward("Rparen");
+                self.assert_and_forward("Lbrace");
                 let consequence = self.parse_block_statement();
-                match self.token() {
-                    Some(Token::Rbrace(_)) => self.forward(),
-                    tk => return Err(format!("Expect Token::Rbrace, get {:?}.", tk)),
-                };
+                self.assert_and_forward("Rbrace");
                 let alternative = match self.token() {
                     Some(Token::Else(_)) => {
                         self.forward();
-                        match self.token() {
-                            Some(Token::Lbrace(_)) => self.forward(),
-                            tk => return Err(format!("Expect Token::Lbrace, get {:?}.", tk)),
-                        };
+                        self.assert_and_forward("Lbrace");
                         let alternative = self.parse_block_statement();
-                        match self.token() {
-                            Some(Token::Rbrace(_)) => self.forward(),
-                            tk => return Err(format!("Expect Token::Rbrace, get {:?}.", tk)),
-                        };
+                        self.assert_and_forward("Rbrace");
                         alternative
                     },
-                    _ => Box::new(Statement::Block(Vec::new())),
+                    _ => Statement::Block(Vec::new()),
                 };
-                Ok(Expression::If {
-                    condition,
-                    consequence,
-                    alternative,
-                })
+                Expression::If {
+                    condition: Box::new(condition),
+                    consequence: Box::new(consequence),
+                    alternative: Box::new(alternative),
+                }
             },
             Token::Function(_) => {
-                self.forward();
-                match self.token() {
-                    Some(Token::Lparen(_)) => self.forward(),
-                    tk => return Err(format!("Expect Token::Lparen, get {:?}.", tk)),
-                };
+                self.assert_and_forward("Lparen");
                 let mut parameters = Vec::new();
                 match self.token() {
                     Some(Token::Rparen(_)) => (),
                     _ => loop {
                         match self.token() {
                             Some(Token::Ident(ident)) => parameters.push(Box::new(Expression::Ident(ident))),
-                            _ => (),
+                            tk => panic!(format!("Expect Token::Ident, get {:?}.", tk)),
                         };
                         self.forward();
                         match self.token() {
@@ -210,45 +173,35 @@ impl Parser {
                         };
                     },
                 };
-                match self.token() {
-                    Some(Token::Rparen(_)) => self.forward(),
-                    tk => return Err(format!("Expect Token::Rparen, get {:?}.", tk)),
-                };
-                match self.token() {
-                    Some(Token::Lbrace(_)) => self.forward(),
-                    tk => return Err(format!("Expect Token::Lbrace, get {:?}.", tk)),
-                };
+                self.assert_and_forward("Rparen");
+                self.assert_and_forward("Lbrace");
                 let body = self.parse_block_statement();
-                match self.token() {
-                    Some(Token::Rbrace(_)) => self.forward(),
-                    tk => return Err(format!("Expect Token::Rbrace, get {:?}.", tk)),
-                };
-                Ok(Expression::Function {
+                self.assert_and_forward("Rbrace");
+                Expression::Function {
                     parameters,
-                    body,
-                })
+                    body: Box::new(body),
+                }
             },
-            token => Err(format!("Invalid token: {:?}", token)),
+            tk => panic!(format!("Invalid token: {:?}", tk)),
         }
     }
 
-    fn parse_block_statement(&mut self) -> Box<Statement> {
+    fn parse_block_statement(&mut self) -> Statement {
         let mut stmts = Vec::new();
         loop {
             match self.token() {
-                Some(Token::Rbrace(_)) | None => break,
+                Some(Token::Rbrace(_)) => break,
                 _ => (),
-            }
+            };
             stmts.push(match self.parse_statement() {
-                Some(Ok(stmt)) => Ok(Box::new(stmt)),
-                Some(Err(s)) => Err(s),
-                None => Err(String::from("Expect a block statement.")),
+                Some(stmt) => Box::new(stmt),
+                None => panic!("Expect a block statement."),
             });
         };
-        Box::new(Statement::Block(stmts))
+        Statement::Block(stmts)
     }
 
-    fn parse_infix(&mut self, left: Result<Expression, String>) -> Result<Expression, String> {
+    fn parse_infix(&mut self, left: Expression) -> Expression {
         match self.token().unwrap() {
             Token::Lparen(_) => {
                 self.forward();
@@ -262,39 +215,33 @@ impl Parser {
                             _ => break,
                         };
                     },
-                }
-                Ok(Expression::Call {
+                };
+                self.assert_and_forward("Rparen");
+                Expression::Call {
                     function: Box::new(left),
                     arguments,
-                })
+                }
             },
-            _ => {
-                let precedence = self.get_precedence(self.token());
-                let operator = match self.token().unwrap() {
-                    Token::Eq(operator) |
-                    Token::NotEq(operator) |
-                    Token::LT(operator) |
-                    Token::GT(operator) |
-                    Token::Plus(operator) |
-                    Token::Minus(operator) |
-                    Token::Slash(operator) |
-                    Token::Asterisk(operator) => operator,
-                    token => return Err(format!("Invalid token: {:?}", token)),
-                };
-                let left = match left {
-                    Ok(expr) => Ok(Box::new(expr)),
-                    Err(s) => Err(s),
+            tk => {
+                let precedence = self.get_precedence(Some(tk.clone()));
+                let operator = match tk {
+                    Token::Eq(op) |
+                    Token::NotEq(op) |
+                    Token::LT(op) |
+                    Token::GT(op) |
+                    Token::Plus(op) |
+                    Token::Minus(op) |
+                    Token::Slash(op) |
+                    Token::Asterisk(op) => op,
+                    tk => panic!(format!("Invalid token: {:?}", tk)),
                 };
                 self.forward();
-                let right = match self.parse_expression(precedence) {
-                    Ok(expr) => Ok(Box::new(expr)),
-                    Err(s) => Err(s),
-                };
-                Ok(Expression::Infix {
+                let right = self.parse_expression(precedence);
+                Expression::Infix {
                     operator,
-                    left,
-                    right,
-                })
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
             },
         }
     }
@@ -302,7 +249,7 @@ impl Parser {
 
 impl Iterator for Parser {
 
-    type Item = Result<Statement, String>;
+    type Item = Statement;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.parse_statement()
@@ -314,9 +261,9 @@ impl Iterator for Parser {
 mod tests {
 
     use super::Lexer;
+    use super::Parser;
     use super::Expression;
     use super::Statement;
-    use super::Parser;
 
     #[test]
     fn parser() {
@@ -358,138 +305,138 @@ mod tests {
         ";
         let output = [
             Statement::Let {
-                ident: Ok(Expression::Ident(String::from("x"))),
-                expr: Ok(Expression::Int(String::from("10"))),
+                ident: Expression::Ident(String::from("x")),
+                expr: Expression::Int(String::from("10")),
             },
-            Statement::Return(Ok(Expression::Int(String::from("1")))),
-            Statement::Expr(Ok(Expression::Int(String::from("2")))),
-            Statement::Expr(Ok(Expression::Prefix {
+            Statement::Return(Expression::Int(String::from("1"))),
+            Statement::Expr(Expression::Int(String::from("2"))),
+            Statement::Expr(Expression::Prefix {
                 operator: String::from("-"),
-                expr: Ok(Box::new(Expression::Int(String::from("3")))),
-            })),
-            Statement::Expr(Ok(Expression::Prefix {
+                expr: Box::new(Expression::Int(String::from("3"))),
+            }),
+            Statement::Expr(Expression::Prefix {
                 operator: String::from("!"),
-                expr: Ok(Box::new(Expression::Int(String::from("4")))),
-            })),
+                expr: Box::new(Expression::Int(String::from("4"))),
+            }),
 
-            Statement::Expr(Ok(Expression::Infix {
+            Statement::Expr(Expression::Infix {
                 operator: String::from("+"),
-                left: Ok(Box::new(Expression::Int(String::from("5")))),
-                right: Ok(Box::new(Expression::Int(String::from("5")))),
-            })),
-            Statement::Expr(Ok(Expression::Infix {
+                left: Box::new(Expression::Int(String::from("5"))),
+                right: Box::new(Expression::Int(String::from("5"))),
+            }),
+            Statement::Expr(Expression::Infix {
                 operator: String::from("-"),
-                left: Ok(Box::new(Expression::Int(String::from("5")))),
-                right: Ok(Box::new(Expression::Int(String::from("5")))),
-            })),
-            Statement::Expr(Ok(Expression::Infix {
+                left: Box::new(Expression::Int(String::from("5"))),
+                right: Box::new(Expression::Int(String::from("5"))),
+            }),
+            Statement::Expr(Expression::Infix {
                 operator: String::from("*"),
-                left: Ok(Box::new(Expression::Int(String::from("5")))),
-                right: Ok(Box::new(Expression::Int(String::from("5")))),
-            })),
-            Statement::Expr(Ok(Expression::Infix {
+                left: Box::new(Expression::Int(String::from("5"))),
+                right: Box::new(Expression::Int(String::from("5"))),
+            }),
+            Statement::Expr(Expression::Infix {
                 operator: String::from("/"),
-                left: Ok(Box::new(Expression::Int(String::from("5")))),
-                right: Ok(Box::new(Expression::Int(String::from("5")))),
-            })),
-            Statement::Expr(Ok(Expression::Infix {
+                left: Box::new(Expression::Int(String::from("5"))),
+                right: Box::new(Expression::Int(String::from("5"))),
+            }),
+            Statement::Expr(Expression::Infix {
                 operator: String::from(">"),
-                left: Ok(Box::new(Expression::Int(String::from("5")))),
-                right: Ok(Box::new(Expression::Int(String::from("5")))),
-            })),
-            Statement::Expr(Ok(Expression::Infix {
+                left: Box::new(Expression::Int(String::from("5"))),
+                right: Box::new(Expression::Int(String::from("5"))),
+            }),
+            Statement::Expr(Expression::Infix {
                 operator: String::from("<"),
-                left: Ok(Box::new(Expression::Int(String::from("5")))),
-                right: Ok(Box::new(Expression::Int(String::from("5")))),
-            })),
-            Statement::Expr(Ok(Expression::Infix {
+                left: Box::new(Expression::Int(String::from("5"))),
+                right: Box::new(Expression::Int(String::from("5"))),
+            }),
+            Statement::Expr(Expression::Infix {
                 operator: String::from("=="),
-                left: Ok(Box::new(Expression::Int(String::from("5")))),
-                right: Ok(Box::new(Expression::Int(String::from("5")))),
-            })),
-            Statement::Expr(Ok(Expression::Infix {
+                left: Box::new(Expression::Int(String::from("5"))),
+                right: Box::new(Expression::Int(String::from("5"))),
+            }),
+            Statement::Expr(Expression::Infix {
                 operator: String::from("!="),
-                left: Ok(Box::new(Expression::Int(String::from("5")))),
-                right: Ok(Box::new(Expression::Int(String::from("5")))),
-            })),
+                left: Box::new(Expression::Int(String::from("5"))),
+                right: Box::new(Expression::Int(String::from("5"))),
+            }),
 
-            Statement::Expr(Ok(Expression::Infix {
+            Statement::Expr(Expression::Infix {
                 operator: String::from("+"),
-                left: Ok(Box::new(Expression::Int(String::from("5")))),
-                right: Ok(Box::new(Expression::Infix {
+                left: Box::new(Expression::Int(String::from("5"))),
+                right: Box::new(Expression::Infix {
                     operator: String::from("*"),
-                    left: Ok(Box::new(Expression::Int(String::from("5")))),
-                    right: Ok(Box::new(Expression::Int(String::from("5")))),
-                })),
-            })),
-            Statement::Expr(Ok(Expression::Infix {
+                    left: Box::new(Expression::Int(String::from("5"))),
+                    right: Box::new(Expression::Int(String::from("5"))),
+                }),
+            }),
+            Statement::Expr(Expression::Infix {
                 operator: String::from("*"),
-                left: Ok(Box::new(Expression::Infix {
+                left: Box::new(Expression::Infix {
                     operator: String::from("+"),
-                    left: Ok(Box::new(Expression::Int(String::from("5")))),
-                    right: Ok(Box::new(Expression::Int(String::from("5")))),
-                })),
-                right: Ok(Box::new(Expression::Int(String::from("5")))),
-            })),
+                    left: Box::new(Expression::Int(String::from("5"))),
+                    right: Box::new(Expression::Int(String::from("5"))),
+                }),
+                right: Box::new(Expression::Int(String::from("5"))),
+            }),
 
-            Statement::Expr(Ok(Expression::Bool(String::from("true")))),
-            Statement::Expr(Ok(Expression::Prefix {
+            Statement::Expr(Expression::Bool(String::from("true"))),
+            Statement::Expr(Expression::Prefix {
                 operator: String::from("!"),
-                expr: Ok(Box::new(Expression::Bool(String::from("false")))),
-            })),
+                expr: Box::new(Expression::Bool(String::from("false"))),
+            }),
 
-            Statement::Expr(Ok(Expression::If {
-                condition: Ok(Box::new(Expression::Ident(String::from("x")))),
+            Statement::Expr(Expression::If {
+                condition: Box::new(Expression::Ident(String::from("x"))),
                 consequence: Box::new(Statement::Block(vec!(
-                    Ok(Box::new(Statement::Expr(Ok(Expression::Ident(String::from("x")))))),
+                    Box::new(Statement::Expr(Expression::Ident(String::from("x")))),
                 ))),
                 alternative: Box::new(Statement::Block(Vec::new())),
-            })),
-            Statement::Expr(Ok(Expression::If {
-                condition: Ok(Box::new(Expression::Infix {
+            }),
+            Statement::Expr(Expression::If {
+                condition: Box::new(Expression::Infix {
                     operator: String::from("<"),
-                    left: Ok(Box::new(Expression::Ident(String::from("x")))),
-                    right: Ok(Box::new(Expression::Ident(String::from("y")))),
-                })),
+                    left: Box::new(Expression::Ident(String::from("x"))),
+                    right: Box::new(Expression::Ident(String::from("y"))),
+                }),
                 consequence: Box::new(Statement::Block(vec!(
-                    Ok(Box::new(Statement::Expr(Ok(Expression::Ident(String::from("x")))))),
+                    Box::new(Statement::Expr(Expression::Ident(String::from("x")))),
                 ))),
                 alternative: Box::new(Statement::Block(vec!(
-                    Ok(Box::new(Statement::Expr(Ok(Expression::Ident(String::from("y")))))),
+                    Box::new(Statement::Expr(Expression::Ident(String::from("y")))),
                 ))),
-            })),
+            }),
 
-            Statement::Expr(Ok(Expression::Function {
+            Statement::Expr(Expression::Function {
                 parameters: Vec::new(),
                 body: Box::new(Statement::Block(Vec::new())),
-            })),
-            Statement::Expr(Ok(Expression::Function {
+            }),
+            Statement::Expr(Expression::Function {
                 parameters: vec!(
                     Box::new(Expression::Ident(String::from("x"))),
                     Box::new(Expression::Ident(String::from("y"))),
                 ),
                 body: Box::new(Statement::Block(vec!(
-                    Ok(Box::new(Statement::Expr(Ok(Expression::Ident(String::from("x")))))),
+                    Box::new(Statement::Expr(Expression::Ident(String::from("x")))),
                 ))),
-            })),
+            }),
 
-            Statement::Expr(Ok(Expression::Call {
-                function: Box::new(Ok(Expression::Ident(String::from("add")))),
+            Statement::Expr(Expression::Call {
+                function: Box::new(Expression::Ident(String::from("add"))),
                 arguments: vec!(
-                    Box::new(Ok(Expression::Int(String::from("1")))),
-                    Box::new(Ok(Expression::Infix {
+                    Box::new(Expression::Int(String::from("1"))),
+                    Box::new(Expression::Infix {
                         operator: String::from("+"),
-                        left: Ok(Box::new(Expression::Int(String::from("2")))),
-                        right: Ok(Box::new(Expression::Int(String::from("3")))),
-                    })),
+                        left: Box::new(Expression::Int(String::from("2"))),
+                        right: Box::new(Expression::Int(String::from("3"))),
+                    }),
                 ),
-            })),
+            }),
         ];
         let lexer = Lexer::new(input);
         let parser = Parser::new(lexer);
         for (result, expected) in parser.zip(output.iter()) {
             println!("Parser: {:?} - {:?}", &result, expected);
-            assert_eq!(&result.unwrap(), expected);
+            assert_eq!(&result, expected);
         }
     }
 }

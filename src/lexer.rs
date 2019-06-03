@@ -3,7 +3,6 @@ use crate::token::Token;
 pub struct Lexer {
     input: Vec<char>,
     pos: usize,
-    next_pos: usize,
 }
 
 impl Lexer {
@@ -11,11 +10,10 @@ impl Lexer {
         Lexer {
             input: input.chars().collect(),
             pos: 0,
-            next_pos: 1,
         }
     }
 
-    fn ch(&mut self) -> Option<char> {
+    fn ch(&self) -> Option<char> {
         if self.pos < self.input.len() {
             Some(self.input[self.pos])
         } else {
@@ -23,9 +21,9 @@ impl Lexer {
         }
     }
 
-    fn next_ch(&mut self) -> Option<char> {
-        if self.next_pos < self.input.len() {
-            Some(self.input[self.next_pos])
+    fn next_ch(&self) -> Option<char> {
+        if self.pos + 1 < self.input.len() {
+            Some(self.input[self.pos+1])
         } else {
             None
         }
@@ -33,16 +31,15 @@ impl Lexer {
 
     fn forward(&mut self) -> () {
         self.pos += 1;
-        self.next_pos += 1;
     }
 
     fn backward(&mut self) -> () {
         self.pos -= 1;
-        self.next_pos -= 1;
     }
 
     fn read_word(&mut self, ch: char) -> Token {
         let mut s = String::new();
+        // Read Int.
         if ch.is_ascii_digit() {
             loop {
                 match self.ch() {
@@ -54,13 +51,11 @@ impl Lexer {
                             return Token::Int(s);
                         }
                     },
-                    None => {
-                        self.backward();
-                        return Token::Int(s);
-                    },
+                    None => panic!("Encounter EOF while Lexing!"),
                 }
                 self.forward();
             }
+        // Read Ident and keywords.
         } else {
             loop {
                 match self.ch() {
@@ -95,6 +90,7 @@ impl Iterator for Lexer {
     type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Skip whitespaces.
         loop {
             let ch = self.ch();
             if ch.is_some() && ch.unwrap().is_whitespace() {
@@ -103,6 +99,7 @@ impl Iterator for Lexer {
                 break;
             }
         }
+        // Read single-char tokens.
         let token = match self.ch() {
             Some('=') => {
                 match self.next_ch() {

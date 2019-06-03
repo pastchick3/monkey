@@ -5,15 +5,15 @@ pub enum Expression {
     Bool(String),
     Prefix {
         operator: String,
-        expr: Result<Box<Expression>, String>,
+        expr: Box<Expression>,
     },
     Infix {
         operator: String,
-        left: Result<Box<Expression>, String>,
-        right: Result<Box<Expression>, String>,
+        left: Box<Expression>,
+        right: Box<Expression>,
     },
     If {
-        condition: Result<Box<Expression>, String>,
+        condition: Box<Expression>,
         consequence: Box<Statement>,
         alternative: Box<Statement>,
     },
@@ -22,18 +22,18 @@ pub enum Expression {
         body: Box<Statement>,
     },
     Call {
-        function: Box<Result<Expression, String>>,
-        arguments: Vec<Box<Result<Expression, String>>>,
+        function: Box<Expression>,
+        arguments: Vec<Box<Expression>>,
     },
 }
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Statement {
     Let {
-        ident: Result<Expression, String>,
-        expr: Result<Expression, String>,
+        ident: Expression,
+        expr: Expression,
     },
-    Return(Result<Expression, String>),
-    Expr(Result<Expression, String>),
-    Block(Vec<Result<Box<Statement>, String>>),
+    Return(Expression),
+    Expr(Expression),
+    Block(Vec<Box<Statement>>),
 }
