@@ -1,4 +1,4 @@
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Expression {
     Ident(String),
     Int(String),
@@ -27,7 +27,7 @@ pub enum Expression {
     },
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Statement {
     Let {
         ident: Expression,
