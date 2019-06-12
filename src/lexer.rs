@@ -39,8 +39,8 @@ impl Lexer {
 
     fn read_word(&mut self, ch: char) -> Token {
         let mut s = String::new();
-        // Read Int.
         if ch.is_ascii_digit() {
+            // Read Int.
             loop {
                 match self.ch() {
                     Some(ch) => {
@@ -55,8 +55,21 @@ impl Lexer {
                 }
                 self.forward();
             }
-        // Read Ident and keywords.
+        } else if ch == '"' {
+            // Read Str.
+            s = String::new();
+            loop {
+                self.forward();
+                match self.ch() {
+                    Some('"') => {
+                        return Token::Str(s);
+                    },
+                    Some(ch) => s.push(ch),
+                    None => panic!("Encounter EOF while Lexing!"),
+                }
+            }
         } else {
+            // Read Ident and keywords.
             loop {
                 match self.ch() {
                     Some(ch) => {
@@ -127,6 +140,8 @@ impl Iterator for Lexer {
             Some('>') => Some(Token::GT(String::from(">"))),
             Some('(') => Some(Token::Lparen(String::from("("))),
             Some(')') => Some(Token::Rparen(String::from(")"))),
+            Some('[') => Some(Token::Lbracket(String::from("["))),
+            Some(']') => Some(Token::Rbracket(String::from("]"))),
             Some('{') => Some(Token::Lbrace(String::from("{"))),
             Some('}') => Some(Token::Rbrace(String::from("}"))),
             Some(',') => Some(Token::Comma(String::from(","))),
@@ -167,6 +182,10 @@ mod tests {
 
             10 == 10;
             10 != 9;
+
+            \"a b\";
+
+            [];
         ";
         let output = [
             Token::Let(String::from("let")),
@@ -231,6 +250,13 @@ mod tests {
             Token::Int(String::from("10")),
             Token::NotEq(String::from("!=")),
             Token::Int(String::from("9")),
+            Token::Semicolon(String::from(";")),
+
+            Token::Str(String::from("a b")),
+            Token::Semicolon(String::from(";")),
+
+            Token::Lbracket(String::from("[")),
+            Token::Rbracket(String::from("]")),
             Token::Semicolon(String::from(";")),
 
             Token::EOF(String::from("")),

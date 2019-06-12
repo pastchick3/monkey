@@ -7,9 +7,11 @@ use crate::ast::Statement;
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Object {
     Int(i32),
+    Str(String),
     Bool(bool),
     Null,
     Return(Box<Object>),
+    Array(Vec<Box<Object>>),
     Function {
         parameters: Vec<Box<Expression>>,
         body: Box<Statement>,
@@ -21,9 +23,20 @@ impl fmt::Display for Object {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Object::Int(v) => write!(f, "{}", v),
+            Object::Str(s) => write!(f, "{}", s),
             Object::Bool(v) => write!(f, "{}", v),
             Object::Null => write!(f, "Null"),
             Object::Return(obj) => write!(f, "{}", *obj),
+            Object::Array(vec) => {
+                let mut s = String::from("[");
+                for obj in vec.iter() {
+                    s += format!("{}, ", obj).as_str();
+                }
+                s.pop();
+                s.pop();
+                s += "]";
+                write!(f, "{}", s)
+            }
             Object::Function {
                 parameters: _,
                 body: _,

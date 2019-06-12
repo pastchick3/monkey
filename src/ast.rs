@@ -2,7 +2,9 @@
 pub enum Expression {
     Ident(String),
     Int(String),
+    Str(String),
     Bool(String),
+    Array(Vec<Box<Expression>>),
     Prefix {
         operator: String,
         expr: Box<Expression>,

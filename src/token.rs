@@ -5,6 +5,7 @@ pub enum Token {
     // identifiers + literals
     Ident(String),    // indentifier
     Int(String),    // integer
+    Str(String),    // string
 
     // operators
     Assign(String),    // "="
@@ -26,6 +27,8 @@ pub enum Token {
     Rparen(String),    // ")"
     Lbrace(String),    // "{"
     Rbrace(String),    // "}"
+    Lbracket(String),    // "["
+    Rbracket(String),    // "]"
 
     // keywords
     Function(String),    // "fn"

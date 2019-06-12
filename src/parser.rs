@@ -11,6 +11,7 @@ const SUM: u8 = 3;    // +
 const PRODUCT: u8 = 4;    // *
 const PREFIX: u8 = 5;    // -X or !X
 const CALL: u8 = 6;    // function()
+const INDEX: u8 = 7;    // arr[0]
 
 pub struct Parser {
     input: Vec<Token>,
@@ -113,6 +114,7 @@ impl Parser {
             Some(Token::Slash(_)) => PRODUCT,
             Some(Token::Asterisk(_)) => PRODUCT,
             Some(Token::Lparen(_)) => CALL,
+            Some(Token::Lbracket(_)) => INDEX,
             _ => LOWEST,
         }
     }
@@ -123,6 +125,7 @@ impl Parser {
         match ch {
             Token::Ident(ident) => Expression::Ident(ident),
             Token::Int(int) => Expression::Int(int),
+            Token::Str(s) => Expression::Str(s),
             Token::True(v) | Token::False(v) => Expression::Bool(v),
             Token::Minus(op) | Token::Bang(op) => Expression::Prefix {
                 operator: op,
@@ -133,6 +136,21 @@ impl Parser {
                 self.assert_and_forward("Rparen");
                 expr
             },
+            Token::Lbracket(_) => {
+                let mut list = Vec::new();
+                match self.token() {
+                    Some(Token::Rbracket(_)) => (),
+                    _ => loop {
+                        list.push(Box::new(self.parse_expression(LOWEST)));
+                        match self.token() {
+                            Some(Token::Comma(_)) => self.forward(),
+                            _ => break,
+                        };
+                    },
+                };
+                self.assert_and_forward("Rbracket");
+                Expression::Array(list)
+            }
             Token::If(_) => {
                 self.assert_and_forward("Lparen");
                 let condition = self.parse_expression(LOWEST);
@@ -232,11 +250,15 @@ impl Parser {
                     Token::Plus(op) |
                     Token::Minus(op) |
                     Token::Slash(op) |
-                    Token::Asterisk(op) => op,
+                    Token::Asterisk(op) |
+                    Token::Lbracket(op) => op,
                     tk => panic!(format!("Invalid token: {:?}", tk)),
                 };
                 self.forward();
                 let right = self.parse_expression(precedence);
+                if operator.as_str() == "[" {
+                    self.assert_and_forward("Rbracket");
+                }
                 Expression::Infix {
                     operator,
                     left: Box::new(left),
@@ -302,6 +324,13 @@ mod tests {
             }
 
             add(1, 2 + 3)
+
+            \"a b\";
+
+            [];
+            [1];
+            [1, 2];
+            arr[1];
         ";
         let output = [
             Statement::Let {
@@ -430,6 +459,21 @@ mod tests {
                         right: Box::new(Expression::Int(String::from("3"))),
                     }),
                 ),
+            }),
+
+            Statement::Expr(Expression::Str(String::from("a b"))),
+            Statement::Expr(Expression::Array(Vec::new())),
+            Statement::Expr(Expression::Array(vec!(
+                Box::new(Expression::Int(String::from("1"))),
+            ))),
+            Statement::Expr(Expression::Array(vec!(
+                Box::new(Expression::Int(String::from("1"))),
+                Box::new(Expression::Int(String::from("2"))),
+            ))),
+            Statement::Expr(Expression::Infix {
+                operator: String::from("["),
+                left: Box::new(Expression::Ident(String::from("arr"))),
+                right: Box::new(Expression::Int(String::from("1"))),
             }),
         ];
         let lexer = Lexer::new(input);

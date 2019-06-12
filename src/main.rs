@@ -13,7 +13,7 @@ use std::io;
 use std::io::Write;
 
 fn main() {
-    println!("Welcome to the Monkey Programming language in Rust!");
+    println!("Welcome to the Monkey Programming Language in Rust!");
     let mut environment = Environment::new();
     loop {
         print!(">> ");
@@ -28,7 +28,6 @@ fn main() {
                     println!("{}", obj);
                     environment = env;
                 }
-                
             }
             Err(_) => continue,
         }

@@ -72,11 +72,20 @@ impl Evaluator {
     fn eval_expression(&mut self, expr: Expression, env: &mut Environment) -> Object {
         match expr {
             Expression::Int(v) => Object::Int(i32::from_str_radix(&v, 10).unwrap()),
+            Expression::Str(s) => Object::Str(s),
             Expression::Bool(v) => if &v == "true" { TRUE } else { FALSE },
             Expression::Prefix { operator, expr } => self.eval_prefix(operator, *expr, env),
             Expression::Infix { operator, left, right } => self.eval_infix(operator, *left, *right, env),
             Expression::If { condition, consequence, alternative } => {
                 self.eval_if(*condition, *consequence, *alternative, env)
+            },
+            Expression::Array(vec) => {
+                let mut obj_vec = Vec::new();
+                for expr in vec.into_iter() {
+                    let obj = self.eval_expression(*expr, env);
+                    obj_vec.push(Box::new(obj));
+                }
+                Object::Array(obj_vec)
             },
             Expression::Ident(ident) => match env.get(&ident) {
                 Some(obj) => obj.clone(),
@@ -133,6 +142,23 @@ impl Evaluator {
                 match op.as_str() {
                     "==" => if l == r { TRUE } else { FALSE },
                     "!=" => if l != r { TRUE } else { FALSE },
+                    op => panic!("unknown operator {:?}", op),
+                }
+            } else { panic!("type mismatch") }
+        } else if let Object::Str(l) = left {
+            if let Object::Str(r) = right {
+                match op.as_str() {
+                    "+" => Object::Str(l+r.as_str()),
+                    op => panic!("unknown operator {:?}", op),
+                }
+            } else { panic!("type mismatch") }
+        } else if let Object::Array(l) = left {
+            if let Object::Int(r) = right {
+                match op.as_str() {
+                    "[" => match l.get(r as usize) {
+                        Some(obj) => (**obj).clone(),
+                        None => NULL,
+                    },
                     op => panic!("unknown operator {:?}", op),
                 }
             } else { panic!("type mismatch") }
@@ -266,6 +292,12 @@ mod tests {
 
             ("let add = fn(x, y) { x + y;}; add(1, add(2, 3));", Object::Int(6), "6"),
             ("fn(x, y) { x + y;}(1, 2);", Object::Int(3), "3"),
+
+            ("\"a b\";", Object::Str(String::from("a b")), "a b"),
+            ("\"a\" + \"b\";", Object::Str(String::from("ab")), "ab"),
+
+            ("let arr = [\"s\", 1]; arr[1];", Object::Int(1), "1"),
+            ("let arr = [\"s\", 1]; arr[2];", Object::Null, "Null"),
         ];
         for (input, expected, display) in test_array.iter() {
             let env = Environment::new();
