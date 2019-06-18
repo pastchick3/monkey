@@ -6,11 +6,13 @@ use crate::object::Object;
 
 const TRUE: Object = Object::Bool(true);
 const FALSE: Object = Object::Bool(false);
+const NULL: Object = Object::Null;
 
 pub struct VM {
     instructions: Option<Vec<Code>>,
     stack: Vec<Object>,
     last_popped: Option<Object>,
+    jump: usize,
 }
 
 impl VM {
@@ -19,17 +21,22 @@ impl VM {
             instructions: Some(instructions),
             stack: vec!(),
             last_popped: None,
+            jump: 0,
         }
     }
 
     pub fn run(mut self) -> (Option<Object>, Object) {
         let instructions = self.instructions.take().unwrap();
         for code in instructions.into_iter() {
-            self.execute(code);
+            if self.jump == 0 {
+                self.execute(code);
+            } else {
+                self.jump -= 1;
+            }
         }
         match self.stack.pop() {
             Some(obj) => (self.last_popped, obj),
-            None => (self.last_popped, Object::Null),
+            None => (self.last_popped, NULL),
         }
     }
 
@@ -42,6 +49,9 @@ impl VM {
             Code::False => self.stack.push(FALSE),
             op @ Code::Minus | op @ Code::Bang => self.execute_prefix(op),
             Code::Pop => { self.last_popped = self.stack.pop(); },
+            Code::JumpNotTruthy(offset) => self.execute_jump_not_truthy(offset),
+            Code::Jump(offset) => self.execute_jump(offset),
+            Code::Null => self.stack.push(NULL),
         }
     }
 
@@ -106,11 +116,23 @@ impl VM {
             Code::Bang => {
                 match self.stack.pop().unwrap() {
                     Object::Bool(v) => self.stack.push(Object::Bool(!v)),
+                    NULL => self.stack.push(Object::Bool(true)),
                     obj => panic!("Expect Object::Bool, get {:?}.", obj),
                 };
             },
             _ => (),
         }
+    }
+
+    fn execute_jump_not_truthy(&mut self, offset: usize) {
+        match self.stack.pop().unwrap() {
+            Object::Bool(false) | NULL => self.execute_jump(offset),
+            _ => (),
+        }
+    }
+
+    fn execute_jump(&mut self, offset: usize) {
+        self.jump = offset;
     }
 }
 
@@ -123,18 +145,21 @@ mod tests {
     #[test]
     fn vm() {
         let test_array = [
-            ("1 + 2;", Object::Null, Some(Object::Int(3))),
-            ("1 - 2;", Object::Null, Some(Object::Int(-1))),
-            ("1 * 2;", Object::Null, Some(Object::Int(2))),
-            ("1 / 2;", Object::Null, Some(Object::Int(0))),
-            ("1 == 2;", Object::Null, Some(Object::Bool(false))),
-            ("1 != 2;", Object::Null, Some(Object::Bool(true))),
-            ("1 > 2;", Object::Null, Some(Object::Bool(false))),
-            ("1 < 2;", Object::Null, Some(Object::Bool(true))),
-            ("true == true;", Object::Null, Some(Object::Bool(true))),
-            ("true != true;", Object::Null, Some(Object::Bool(false))),
-            ("-1;", Object::Null, Some(Object::Int(-1))),
-            ("!true;", Object::Null, Some(Object::Bool(false))),
+            ("1 + 2;", NULL, Some(Object::Int(3))),
+            ("1 - 2;", NULL, Some(Object::Int(-1))),
+            ("1 * 2;", NULL, Some(Object::Int(2))),
+            ("1 / 2;", NULL, Some(Object::Int(0))),
+            ("1 == 2;", NULL, Some(Object::Bool(false))),
+            ("1 != 2;", NULL, Some(Object::Bool(true))),
+            ("1 > 2;", NULL, Some(Object::Bool(false))),
+            ("1 < 2;", NULL, Some(Object::Bool(true))),
+            ("true == true;", NULL, Some(Object::Bool(true))),
+            ("true != true;", NULL, Some(Object::Bool(false))),
+            ("-1;", NULL, Some(Object::Int(-1))),
+            ("!true;", NULL, Some(Object::Bool(false))),
+            ("!(if (false) { 1 });", NULL, Some(Object::Bool(true))),
+            ("if (true) { 1 } else {2};", NULL, Some(Object::Int(1))),
+            ("if (false) { 1 };", NULL, Some(NULL)),
         ];
         for (input, result, popped) in test_array.iter() {
             let lexer = Lexer::new(input);

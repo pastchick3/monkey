@@ -16,4 +16,7 @@ pub enum Code {
     LessThan,
     Minus,
     Bang,
+    JumpNotTruthy(usize),
+    Jump(usize),
+    Null,
 }

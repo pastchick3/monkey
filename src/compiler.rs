@@ -34,7 +34,11 @@ impl Compiler {
                 self.compile_expression(expr);
                 self.instructions.push(Code::Pop);
             },
-            Statement::Block(block) => (),
+            Statement::Block(block) => {
+                for stmt in block.iter() {
+                    self.compile_statement((**stmt).clone());
+                }
+            },
         }
     }
 
@@ -47,7 +51,7 @@ impl Compiler {
             Expression::Array(exprs) => (),
             Expression::Prefix { operator, expr } => self.compile_prefix(operator, *expr),
             Expression::Infix { operator, left, right } => self.compile_infix(operator, *left, *right),
-            Expression::If { condition, consequence, alternative } => (),
+            Expression::If { condition, consequence, alternative } => self.compile_if(*condition, *consequence, *alternative),
             Expression::Function { parameters, body } => (),
             Expression::Call { function, arguments } => (),
         }
@@ -89,8 +93,38 @@ impl Compiler {
             op => panic!("Unknown operator {}.", op),
         };
     }
-}
 
+    fn compile_if(&mut self, condition: Expression, consequence: Statement, alternative: Statement) {
+        self.compile_expression(condition);
+        // consequence
+        let pos = self.instructions.len();
+        self.instructions.push(Code::JumpNotTruthy(9999));
+        self.compile_statement(consequence);
+        match self.instructions.pop().unwrap() {
+            Code::Pop => (),
+            code => self.instructions.push(code),
+        }
+        let offset = self.instructions.len() - pos;
+        self.instructions.push(Code::JumpNotTruthy(offset));
+        self.instructions.swap_remove(pos);
+        // alternative
+        let pos = self.instructions.len();
+        self.instructions.push(Code::Jump(9999));
+        self.compile_statement(alternative);
+        match self.instructions.pop().unwrap() {
+            Code::Pop => (),
+            code => self.instructions.push(code),
+        }
+        let mut offset = self.instructions.len() - 1 - pos;
+        if offset == 0 {
+            offset = 1;
+            self.instructions.push(Code::Null);
+        };
+        self.instructions.push(Code::Jump(offset));
+        self.instructions.swap_remove(pos);
+        
+    }
+}
 
 
 #[cfg(test)]
@@ -156,6 +190,39 @@ mod tests {
             )),
             ("!true;", vec!(
                 Code::True,
+                Code::Bang,
+                Code::Pop,
+            )),
+            ("if (true) { 1 } else {2};", vec!(
+                Code::True,
+                Code::JumpNotTruthy(2),
+                Code::Constant(Object::Int(1)),
+                Code::Jump(1),
+                Code::Constant(Object::Int(2)),
+                Code::Pop,
+            )),
+            ("if (true) { 1 };", vec!(
+                Code::True,
+                Code::JumpNotTruthy(2),
+                Code::Constant(Object::Int(1)),
+                Code::Jump(1),
+                Code::Null,
+                Code::Pop,
+            )),
+            ("if (false) { 1 };", vec!(
+                Code::False,
+                Code::JumpNotTruthy(2),
+                Code::Constant(Object::Int(1)),
+                Code::Jump(1),
+                Code::Null,
+                Code::Pop,
+            )),
+            ("!(if (false) { 1 });", vec!(
+                Code::False,
+                Code::JumpNotTruthy(2),
+                Code::Constant(Object::Int(1)),
+                Code::Jump(1),
+                Code::Null,
                 Code::Bang,
                 Code::Pop,
             )),
