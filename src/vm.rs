@@ -59,26 +59,41 @@ impl VM {
             Code::Null => self.stack.push(NULL),
             Code::SetGlobal(index) => { self.globals.insert(index, self.stack.pop().unwrap()); },
             Code::GetGlobal(index) => { self.stack.push(self.globals.get(&index).unwrap().clone()); },
+            Code::Array(size) => self.execute_array(size),
+            Code::Index => self.execute_index(),
         }
     }
 
     fn execute_arithmetic(&mut self, op: Code) {
-        let right = match self.stack.pop().unwrap() {
-            Object::Int(right) => right,
-            obj => panic!("Expected Object::Int, get {:?}.", obj),
+        let right = self.stack.pop().unwrap();
+        if let Object::Int(right) = right {
+            let left = self.stack.pop().unwrap();
+            if let Object::Int(left) = left {
+                let value = match op {
+                    Code::Add => left + right,
+                    Code::Sub => left - right,
+                    Code::Mul => left * right,
+                    Code::Div => left / right,
+                    op => panic!("Unexpected arithmatic operator {:?}.", op),
+                };
+                self.stack.push(Object::Int(value));
+            } else {
+                panic!("Expect Object::Int, get {}.", left);
+            };
+        } else if let Object::Str(right) = right {
+            let left = self.stack.pop().unwrap();
+            if let Object::Str(left) = left {
+                let value = match op {
+                    Code::Add => left + &right,
+                    op => panic!("Unexpected arithmatic operator {:?}.", op),
+                };
+                self.stack.push(Object::Str(value));
+            } else {
+                panic!("Expect Object::Str, get {}.", left);
+            };
+        } else {
+            panic!("Expect Object::Int or Object::Str, get {}.", right);
         };
-        let left = match self.stack.pop().unwrap() {
-            Object::Int(left) => left,
-            obj => panic!("Expected Object::Int, get {:?}.", obj),
-        };
-        let int = match op {
-            Code::Add => left + right,
-            Code::Sub => left - right,
-            Code::Mul => left * right,
-            Code::Div => left / right,
-            op => panic!("Unexpected arithmatic operator {:?}.", op),
-        };
-        self.stack.push(Object::Int(int));
     }
 
     fn execute_comparison(&mut self, op: Code) {
@@ -141,6 +156,30 @@ impl VM {
     fn execute_jump(&mut self, offset: usize) {
         self.jump = offset;
     }
+
+    fn execute_array(&mut self, size: usize) {
+        let mut array = Vec::new();
+        for _ in 0..size {
+            array.push(Box::new(self.stack.pop().unwrap()));
+        }
+        array.reverse();
+        self.stack.push(Object::Array(array));
+    }
+
+    fn execute_index(&mut self) {
+        let index = match self.stack.pop().unwrap() {
+            Object::Int(v) => v,
+            obj => panic!("Expect Object::Int, get {:?}.", obj),
+        };
+        let array = match self.stack.pop().unwrap() {
+            Object::Array(v) => v,
+            obj => panic!("Expect Object::Array, get {:?}.", obj),
+        };
+        self.stack.push(match array.get(index as usize) {
+            Some(obj) => (**obj).clone(),
+            None => NULL,
+        });
+    }
 }
 
 
@@ -168,6 +207,12 @@ mod tests {
             ("if (true) { 1 } else {2};", NULL, Some(Object::Int(1))),
             ("if (false) { 1 };", NULL, Some(NULL)),
             ("let a = 1; a + 1;", NULL, Some(Object::Int(2))),
+            ("\"a\" + \"b\";", NULL, Some(Object::Str(String::from("ab")))),
+            ("[1, 2];", NULL, Some(Object::Array(vec!(
+                Box::new(Object::Int(1)),
+                Box::new(Object::Int(2)),
+            )))),
+            ("[1, 2][1];", NULL, Some(Object::Int(2))),
         ];
         for (input, result, popped) in test_array.iter() {
             let lexer = Lexer::new(input);

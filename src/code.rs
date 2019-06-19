@@ -23,6 +23,8 @@ pub enum Code {
     Null,
     SetGlobal(u32),
     GetGlobal(u32),
+    Array(usize),
+    Index,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]

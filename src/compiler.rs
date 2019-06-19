@@ -60,9 +60,9 @@ impl Compiler {
         match expr {
             Expression::Ident(v) => self.compile_ident(v),
             Expression::Int(v) => self.compile_int(v),
-            Expression::Str(v) => (),
+            Expression::Str(v) => self.instructions.push(Code::Constant(Object::Str(v))),
             Expression::Bool(v) => self.compile_bool(v),
-            Expression::Array(exprs) => (),
+            Expression::Array(exprs) => self.compile_array(exprs),
             Expression::Prefix { operator, expr } => self.compile_prefix(operator, *expr),
             Expression::Infix { operator, left, right } => self.compile_infix(operator, *left, *right),
             Expression::If { condition, consequence, alternative } => self.compile_if(*condition, *consequence, *alternative),
@@ -90,6 +90,14 @@ impl Compiler {
         }
     }
 
+    fn compile_array(&mut self, exprs: Vec<Box<Expression>>) {
+        let size = exprs.len();
+        for expr in exprs.into_iter() {
+            self.compile_expression(*expr);
+        }
+        self.instructions.push(Code::Array(size));
+    }
+
     fn compile_infix(&mut self, operator: String, left: Expression, right: Expression) {
         self.compile_expression(left);
         self.compile_expression(right);
@@ -102,6 +110,7 @@ impl Compiler {
             "!=" => self.instructions.push(Code::NotEqual),
             ">" => self.instructions.push(Code::GreaterThan),
             "<" => self.instructions.push(Code::LessThan),
+            "[" => self.instructions.push(Code::Index),
             op => panic!("Unknown operator {}.", op),
         };
     }
@@ -267,6 +276,20 @@ mod tests {
                 Code::GetGlobal(1),
                 Code::Jump(1),
                 Code::Null,
+                Code::Pop,
+            )),
+            ("\"a\" + \"b\";", vec!(
+                Code::Constant(Object::Str(String::from("a"))),
+                Code::Constant(Object::Str(String::from("b"))),
+                Code::Add,
+                Code::Pop,
+            )),
+            ("[1, 2][1];", vec!(
+                Code::Constant(Object::Int(1)),
+                Code::Constant(Object::Int(2)),
+                Code::Array(2),
+                Code::Constant(Object::Int(1)),
+                Code::Index,
                 Code::Pop,
             )),
         ];
