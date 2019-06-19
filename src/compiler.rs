@@ -4,31 +4,35 @@ use crate::parser::Parser;
 use crate::ast::Statement;
 use crate::ast::Expression;
 use crate::object::Object;
+use crate::code::SymbolTable;
+use crate::code::Symbol;
 
 pub struct Compiler {
     input: Option<Vec<Statement>>,
     instructions: Vec<Code>,
+    symbol_table: SymbolTable,
 }
 
 impl Compiler {
-    pub fn new(parser: Parser) -> Compiler {
+    pub fn new(parser: Parser, symbol_table: SymbolTable) -> Compiler {
         Compiler {
             input: Some(parser.collect()),
             instructions: vec!(),
+            symbol_table,
         }
     }
 
-    pub fn run(mut self) -> Vec<Code> {
+    pub fn run(mut self) -> (Vec<Code>, SymbolTable) {
         let input = self.input.take().unwrap();
         for stmt in input.into_iter() {
             self.compile_statement(stmt);
         }
-        self.instructions
+        (self.instructions, self.symbol_table)
     }
 
     fn compile_statement(&mut self, stmt: Statement) {
         match stmt {
-            Statement::Let { ident, expr } => (),
+            Statement::Let { ident, expr } => self.compile_let(ident, expr),
             Statement::Return(expr) => (),
             Statement::Expr(expr) => {
                 self.compile_expression(expr);
@@ -42,9 +46,19 @@ impl Compiler {
         }
     }
 
+    fn compile_let(&mut self, ident: Expression, expr: Expression) {
+        self.compile_expression(expr);
+        let name = match ident {
+            Expression::Ident(name) => name,
+            ident => panic!("Invalid identifier {:?}.", ident),
+        };
+        let index = self.symbol_table.define(&name);
+        self.instructions.push(Code::SetGlobal(index));
+    }
+
     fn compile_expression(&mut self, expr: Expression) {
         match expr {
-            Expression::Ident(v) => (),
+            Expression::Ident(v) => self.compile_ident(v),
             Expression::Int(v) => self.compile_int(v),
             Expression::Str(v) => (),
             Expression::Bool(v) => self.compile_bool(v),
@@ -55,6 +69,13 @@ impl Compiler {
             Expression::Function { parameters, body } => (),
             Expression::Call { function, arguments } => (),
         }
+    }
+
+    fn compile_ident(&mut self, v: String) {
+        match self.symbol_table.resolve(&v) {
+            Some(Symbol { name: _, scope: _, index }) => self.instructions.push(Code::GetGlobal(*index)),
+            None => panic!("Identifier {} not found.", v),
+        };
     }
 
     fn compile_int(&mut self, v: String) {
@@ -226,12 +247,35 @@ mod tests {
                 Code::Bang,
                 Code::Pop,
             )),
+            ("
+                let x = 5;
+                if (x > 1) {
+                    let y = x + 1;
+                    y;
+                }
+            ", vec!(
+                Code::Constant(Object::Int(5)),
+                Code::SetGlobal(0),
+                Code::GetGlobal(0),
+                Code::Constant(Object::Int(1)),
+                Code::GreaterThan,
+                Code::JumpNotTruthy(6),
+                Code::GetGlobal(0),
+                Code::Constant(Object::Int(1)),
+                Code::Add,
+                Code::SetGlobal(1),
+                Code::GetGlobal(1),
+                Code::Jump(1),
+                Code::Null,
+                Code::Pop,
+            )),
         ];
         for (input, expected) in test_array.iter() {
             let lexer = Lexer::new(input);
             let parser = Parser::new(lexer);
-            let compiler = Compiler::new(parser);
-            let output = compiler.run();
+            let symbol_table = SymbolTable::new();
+            let compiler = Compiler::new(parser, symbol_table);
+            let (output, symbol_table) = compiler.run();
             println!("Compiler: {:?} - {:?}", input, output);
             assert_eq!(expected, &output);
         }

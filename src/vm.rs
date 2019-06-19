@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use crate::code::Code;
+use crate::code::SymbolTable;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::compiler::Compiler;
@@ -13,19 +16,21 @@ pub struct VM {
     stack: Vec<Object>,
     last_popped: Option<Object>,
     jump: usize,
+    globals: HashMap<u32, Object>,
 }
 
 impl VM {
-    pub fn new(instructions: Vec<Code>) -> VM {
+    pub fn new(instructions: Vec<Code>, globals: HashMap<u32, Object>) -> VM {
         VM {
             instructions: Some(instructions),
             stack: vec!(),
             last_popped: None,
             jump: 0,
+            globals,
         }
     }
 
-    pub fn run(mut self) -> (Option<Object>, Object) {
+    pub fn run(mut self) -> (Object, Option<Object>, HashMap<u32, Object>) {
         let instructions = self.instructions.take().unwrap();
         for code in instructions.into_iter() {
             if self.jump == 0 {
@@ -35,8 +40,8 @@ impl VM {
             }
         }
         match self.stack.pop() {
-            Some(obj) => (self.last_popped, obj),
-            None => (self.last_popped, NULL),
+            Some(obj) => (obj, self.last_popped, self.globals),
+            None => (NULL, self.last_popped, self.globals),
         }
     }
 
@@ -52,6 +57,8 @@ impl VM {
             Code::JumpNotTruthy(offset) => self.execute_jump_not_truthy(offset),
             Code::Jump(offset) => self.execute_jump(offset),
             Code::Null => self.stack.push(NULL),
+            Code::SetGlobal(index) => { self.globals.insert(index, self.stack.pop().unwrap()); },
+            Code::GetGlobal(index) => { self.stack.push(self.globals.get(&index).unwrap().clone()); },
         }
     }
 
@@ -160,14 +167,17 @@ mod tests {
             ("!(if (false) { 1 });", NULL, Some(Object::Bool(true))),
             ("if (true) { 1 } else {2};", NULL, Some(Object::Int(1))),
             ("if (false) { 1 };", NULL, Some(NULL)),
+            ("let a = 1; a + 1;", NULL, Some(Object::Int(2))),
         ];
         for (input, result, popped) in test_array.iter() {
             let lexer = Lexer::new(input);
             let parser = Parser::new(lexer);
-            let compiler = Compiler::new(parser);
-            let code = compiler.run();
-            let vm = VM::new(code);
-            let (p, r) = vm.run();
+            let symbol_table = SymbolTable::new();
+            let compiler = Compiler::new(parser, symbol_table);
+            let (code, symbol_table) = compiler.run();
+            let globals = HashMap::new();
+            let vm = VM::new(code, globals);
+            let (r, p, g) = vm.run();
             println!("VM: {:?} - {:?} - {:?}", input, r, p);
             assert_eq!(result, &r);
             assert_eq!(popped, &p);
