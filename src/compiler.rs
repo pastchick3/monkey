@@ -10,7 +10,7 @@ use crate::code::Scope;
 
 pub struct Compiler {
     input: Option<Vec<Statement>>,
-    scopes: Vec<Vec<Code>>,
+    scopes: Vec<Vec<Code>>,    // Vec<instructions>
     instructions: Vec<Code>,
     symbol_table: SymbolTable,
 }
@@ -107,6 +107,7 @@ impl Compiler {
         let int = Object::Int(i32::from_str_radix(&v, 10).unwrap());
         self.instructions.push(Code::Constant(int));
     }
+
     fn compile_bool(&mut self, v: String) {
         match v.as_str() {
             "true" => self.instructions.push(Code::True),
@@ -121,6 +122,15 @@ impl Compiler {
             self.compile_expression(*expr);
         }
         self.instructions.push(Code::Array(size));
+    }
+
+    fn compile_prefix(&mut self, operator: String, expr: Expression) {
+        self.compile_expression(expr);
+        match operator.as_str() {
+            "-" => self.instructions.push(Code::Minus),
+            "!" => self.instructions.push(Code::Bang),
+            op => panic!("Unknown operator {}.", op),
+        };
     }
 
     fn compile_infix(&mut self, operator: String, left: Expression, right: Expression) {
@@ -140,16 +150,8 @@ impl Compiler {
         };
     }
 
-    fn compile_prefix(&mut self, operator: String, expr: Expression) {
-        self.compile_expression(expr);
-        match operator.as_str() {
-            "-" => self.instructions.push(Code::Minus),
-            "!" => self.instructions.push(Code::Bang),
-            op => panic!("Unknown operator {}.", op),
-        };
-    }
-
-    fn compile_if(&mut self, condition: Expression, consequence: Statement, alternative: Statement) {
+    fn compile_if(&mut self, condition: Expression,
+                  consequence: Statement, alternative: Statement) {
         self.compile_expression(condition);
         // consequence
         let pos = self.instructions.len();

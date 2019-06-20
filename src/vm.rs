@@ -63,8 +63,10 @@ impl VM {
     fn execute(&mut self, code: Code) {
         match code {
             Code::Constant(obj) => self.stack.push(obj),
-            op @ Code::Add | op @ Code::Sub | op @ Code::Mul | op @ Code::Div => self.execute_arithmetic(op),
-            op @ Code::Equal | op @ Code::NotEqual | op @ Code::GreaterThan | op @ Code::LessThan => self.execute_comparison(op),
+            op @ Code::Add | op @ Code::Sub |
+            op @ Code::Mul | op @ Code::Div => self.execute_arithmetic(op),
+            op @ Code::Equal | op @ Code::NotEqual |
+            op @ Code::GreaterThan | op @ Code::LessThan => self.execute_comparison(op),
             Code::True => self.stack.push(TRUE),
             Code::False => self.stack.push(FALSE),
             op @ Code::Minus | op @ Code::Bang => self.execute_prefix(op),
@@ -222,7 +224,8 @@ impl VM {
     fn execute_call(&mut self, num_args: usize) {
         let func = self.stack.remove(self.stack.len()-num_args-1);
         let (instructions, num_locals, num_paras) = match func {
-            Object::CompiledFunction { instructions, num_locals, num_paras } => (instructions, num_locals, num_paras),
+            Object::CompiledFunction { instructions, num_locals, num_paras } =>
+                (instructions, num_locals, num_paras),
             obj => panic!("Expect Object::CompiledFunction, get {:?}.", obj),
         };
         assert_eq!(num_args, num_paras, "{} args vs {} paras", num_args, num_paras);
