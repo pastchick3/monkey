@@ -31,7 +31,7 @@ fn main() {
     println!("Welcome to the Monkey Programming Language in Rust! ({})",
              if vm_flag { "VM" } else { "Interpreter" });
     let mut environment = Environment::new();
-    let mut symbol_table = SymbolTable::new();
+    let mut symbol_table = SymbolTable::new(None);
     let mut globals = HashMap::new();
     loop {
         print!(">> ");
@@ -45,7 +45,7 @@ fn main() {
                     let compiler = Compiler::new(parser, symbol_table);
                     let (code, sym_table) = compiler.run();
                     let vm = VM::new(code, globals);
-                    let (result, popped, gb) = vm.run();
+                    let (result, _popped, gb) = vm.run();
                     println!("{}", result);
                     symbol_table = sym_table;
                     globals = gb;

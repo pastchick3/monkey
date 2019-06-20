@@ -11,34 +11,49 @@ const TRUE: Object = Object::Bool(true);
 const FALSE: Object = Object::Bool(false);
 const NULL: Object = Object::Null;
 
+#[derive(Clone)]
+struct Frame {
+    instructions: Vec<Code>,
+    base: usize,
+}
+
 pub struct VM {
-    instructions: Option<Vec<Code>>,
+    frames: Vec<Frame>,
+    instructions: Vec<Code>,
     stack: Vec<Object>,
+    base: usize,
     last_popped: Option<Object>,
     jump: usize,
-    globals: HashMap<u32, Object>,
+    globals: HashMap<usize, Object>,
 }
 
 impl VM {
-    pub fn new(instructions: Vec<Code>, globals: HashMap<u32, Object>) -> VM {
+    pub fn new(mut instructions: Vec<Code>, globals: HashMap<usize, Object>) -> VM {
+        instructions.reverse();
         VM {
-            instructions: Some(instructions),
+            frames: vec!(),
+            instructions,
             stack: vec!(),
+            base: 0,
             last_popped: None,
             jump: 0,
             globals,
         }
     }
 
-    pub fn run(mut self) -> (Object, Option<Object>, HashMap<u32, Object>) {
-        let instructions = self.instructions.take().unwrap();
-        for code in instructions.into_iter() {
-            if self.jump == 0 {
-                self.execute(code);
-            } else {
-                self.jump -= 1;
-            }
-        }
+    pub fn run(mut self) -> (Object, Option<Object>, HashMap<usize, Object>) {
+        loop {
+            match self.instructions.pop() {
+                Some(code) => {
+                    if self.jump == 0 {
+                        self.execute(code);
+                    } else {
+                        self.jump -= 1;
+                    };
+                },
+                None => break,
+            };
+        };
         match self.stack.pop() {
             Some(obj) => (obj, self.last_popped, self.globals),
             None => (NULL, self.last_popped, self.globals),
@@ -61,6 +76,29 @@ impl VM {
             Code::GetGlobal(index) => { self.stack.push(self.globals.get(&index).unwrap().clone()); },
             Code::Array(size) => self.execute_array(size),
             Code::Index => self.execute_index(),
+            Code::ReturnValue => self.execute_return_value(),
+            Code::Return => self.execute_return(),
+            Code::Call(num_args) => self.execute_call(num_args),
+            Code::SetLocal(index) => { self.stack.swap_remove(self.base+index); },
+            Code::GetLocal(index) => { self.stack.push(self.stack.get(self.base+index).unwrap().clone()); },
+        }
+    }
+
+    fn push_frame(&mut self, mut instructions: Vec<Code>, base: usize) {
+        self.frames.push(Frame {
+            instructions: self.instructions.clone(),
+            base,
+        });
+        instructions.reverse();
+        self.instructions = instructions;
+        self.base = base;
+    }
+
+    fn pop_frame(&mut self) {
+        let Frame { instructions, base } = self.frames.pop().unwrap();
+        self.instructions = instructions;
+        while self.stack.len() > base {
+            self.stack.pop();
         }
     }
 
@@ -180,6 +218,30 @@ impl VM {
             None => NULL,
         });
     }
+
+    fn execute_call(&mut self, num_args: usize) {
+        let func = self.stack.remove(self.stack.len()-num_args-1);
+        let (instructions, num_locals, num_paras) = match func {
+            Object::CompiledFunction { instructions, num_locals, num_paras } => (instructions, num_locals, num_paras),
+            obj => panic!("Expect Object::CompiledFunction, get {:?}.", obj),
+        };
+        assert_eq!(num_args, num_paras, "{} args vs {} paras", num_args, num_paras);
+        self.push_frame(instructions, self.stack.len()-num_args);
+        for _ in 0..num_locals {
+            self.stack.push(NULL);
+        }
+    }
+
+    fn execute_return_value(&mut self) {
+        let value = self.stack.pop().unwrap();
+        self.pop_frame();
+        self.stack.push(value);
+    }
+
+    fn execute_return(&mut self) {
+        self.pop_frame();
+        self.stack.push(NULL);
+    }
 }
 
 
@@ -213,16 +275,25 @@ mod tests {
                 Box::new(Object::Int(2)),
             )))),
             ("[1, 2][1];", NULL, Some(Object::Int(2))),
+            ("fn() { return 1; }();", NULL, Some(Object::Int(1))),
+            ("fn() { 1; }();", NULL, Some(Object::Int(1))),
+            ("fn() {}();", NULL, Some(NULL)),
+            ("
+                let a = 1; 
+                let b = fn() { let a = 2; a; }();
+                a + b;
+            ", NULL, Some(Object::Int(3))),
+            ("fn(a) { a; }(1);", NULL, Some(Object::Int(1))),
         ];
         for (input, result, popped) in test_array.iter() {
             let lexer = Lexer::new(input);
             let parser = Parser::new(lexer);
-            let symbol_table = SymbolTable::new();
+            let symbol_table = SymbolTable::new(None);
             let compiler = Compiler::new(parser, symbol_table);
-            let (code, symbol_table) = compiler.run();
+            let (code, _symbol_table) = compiler.run();
             let globals = HashMap::new();
             let vm = VM::new(code, globals);
-            let (r, p, g) = vm.run();
+            let (r, p, _g) = vm.run();
             println!("VM: {:?} - {:?} - {:?}", input, r, p);
             assert_eq!(result, &r);
             assert_eq!(popped, &p);

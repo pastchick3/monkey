@@ -6,9 +6,11 @@ use crate::ast::Expression;
 use crate::object::Object;
 use crate::code::SymbolTable;
 use crate::code::Symbol;
+use crate::code::Scope;
 
 pub struct Compiler {
     input: Option<Vec<Statement>>,
+    scopes: Vec<Vec<Code>>,
     instructions: Vec<Code>,
     symbol_table: SymbolTable,
 }
@@ -17,6 +19,7 @@ impl Compiler {
     pub fn new(parser: Parser, symbol_table: SymbolTable) -> Compiler {
         Compiler {
             input: Some(parser.collect()),
+            scopes: vec!(),
             instructions: vec!(),
             symbol_table,
         }
@@ -30,10 +33,28 @@ impl Compiler {
         (self.instructions, self.symbol_table)
     }
 
+    fn enter_scope(&mut self) {
+        self.symbol_table = SymbolTable::new(Some(Box::new(self.symbol_table.clone())));
+        self.scopes.push(self.instructions.clone());
+        self.instructions = vec!();
+    }
+
+    fn leave_scope(&mut self) -> (Vec<Code>, usize) {
+        let num_locals = self.symbol_table.num_definitions;
+        let outer = self.symbol_table.clone().get_outer();
+        self.symbol_table = *outer.unwrap();
+        let instructions = self.instructions.clone();
+        self.instructions = self.scopes.pop().unwrap();
+        (instructions, num_locals)
+    }
+
     fn compile_statement(&mut self, stmt: Statement) {
         match stmt {
             Statement::Let { ident, expr } => self.compile_let(ident, expr),
-            Statement::Return(expr) => (),
+            Statement::Return(expr) => {
+                self.compile_expression(expr);
+                self.instructions.push(Code::ReturnValue);
+            },
             Statement::Expr(expr) => {
                 self.compile_expression(expr);
                 self.instructions.push(Code::Pop);
@@ -52,8 +73,11 @@ impl Compiler {
             Expression::Ident(name) => name,
             ident => panic!("Invalid identifier {:?}.", ident),
         };
-        let index = self.symbol_table.define(&name);
-        self.instructions.push(Code::SetGlobal(index));
+        let symbol = self.symbol_table.define(&name);
+        match symbol.scope {
+            Scope::Global => self.instructions.push(Code::SetGlobal(symbol.index)),
+            Scope::Local => self.instructions.push(Code::SetLocal(symbol.index)),
+        };
     }
 
     fn compile_expression(&mut self, expr: Expression) {
@@ -66,14 +90,15 @@ impl Compiler {
             Expression::Prefix { operator, expr } => self.compile_prefix(operator, *expr),
             Expression::Infix { operator, left, right } => self.compile_infix(operator, *left, *right),
             Expression::If { condition, consequence, alternative } => self.compile_if(*condition, *consequence, *alternative),
-            Expression::Function { parameters, body } => (),
-            Expression::Call { function, arguments } => (),
+            Expression::Function { parameters, body } => self.compile_function(parameters, *body),
+            Expression::Call { function, arguments } => self.compile_call(*function, arguments),
         }
     }
 
     fn compile_ident(&mut self, v: String) {
         match self.symbol_table.resolve(&v) {
-            Some(Symbol { name: _, scope: _, index }) => self.instructions.push(Code::GetGlobal(*index)),
+            Some(Symbol { name: _, scope: Scope::Global, index }) => self.instructions.push(Code::GetGlobal(index)),
+            Some(Symbol { name: _, scope: Scope::Local, index }) => self.instructions.push(Code::GetLocal(index)),
             None => panic!("Identifier {} not found.", v),
         };
     }
@@ -152,7 +177,40 @@ impl Compiler {
         };
         self.instructions.push(Code::Jump(offset));
         self.instructions.swap_remove(pos);
-        
+    }
+
+    fn compile_function(&mut self, parameters: Vec<Box<Expression>>, body: Statement) {
+        self.enter_scope();
+        let num_paras = parameters.len();
+        for para in parameters.into_iter() {
+            let name = match *para {
+                Expression::Ident(name) => name,
+                expr => panic!("Expect Expression::Ident, get {:?}.", expr),
+            };
+            self.symbol_table.define(&name);
+        }
+        self.compile_statement(body);
+        let (mut instructions, num_locals) = self.leave_scope();
+        match instructions.pop() {
+            Some(Code::Pop) => instructions.push(Code::ReturnValue),
+            None => instructions.push(Code::Return),
+            Some(code) => instructions.push(code),
+        };
+        let compiled_function = Object::CompiledFunction {
+            instructions,
+            num_locals,
+            num_paras,
+        };
+        self.instructions.push(Code::Constant(compiled_function));
+    }
+
+    fn compile_call(&mut self, function: Expression, arguments: Vec<Box<Expression>>) {
+        self.compile_expression(function);
+        let num_args = arguments.len();
+        for arg in arguments.into_iter() {
+            self.compile_expression(*arg);
+        }
+        self.instructions.push(Code::Call(num_args));
     }
 }
 
@@ -292,13 +350,75 @@ mod tests {
                 Code::Index,
                 Code::Pop,
             )),
+            ("fn() { return 1; }();", vec!(
+                Code::Constant(Object::CompiledFunction {
+                    instructions: vec!(
+                        Code::Constant(Object::Int(1)),
+                        Code::ReturnValue,
+                    ),
+                    num_locals: 0,
+                    num_paras: 0,
+                }),
+                Code::Call(0),
+                Code::Pop,
+            )),
+            ("fn() { 1; }();", vec!(
+                Code::Constant(Object::CompiledFunction {
+                    instructions: vec!(
+                        Code::Constant(Object::Int(1)),
+                        Code::ReturnValue,
+                    ),
+                    num_locals: 0,
+                    num_paras: 0,
+                }),
+                Code::Call(0),
+                Code::Pop,
+            )),
+            ("fn() {}();", vec!(
+                Code::Constant(Object::CompiledFunction {
+                    instructions: vec!(
+                        Code::Return,
+                    ),
+                    num_locals: 0,
+                    num_paras: 0,
+                }),
+                Code::Call(0),
+                Code::Pop,
+            )),
+            ("fn() { let a = 1; a; }();", vec!(
+                Code::Constant(Object::CompiledFunction {
+                    instructions: vec!(
+                        Code::Constant(Object::Int(1)),
+                        Code::SetLocal(0),
+                        Code::GetLocal(0),
+                        Code::ReturnValue,
+                    ),
+                    num_locals: 1,
+                    num_paras: 0,
+                }),
+                Code::Call(0),
+                Code::Pop,
+            )),
+            ("fn(a) { a; }(1);", vec!(
+                Code::Constant(Object::CompiledFunction {
+                    instructions: vec!(
+                        Code::GetLocal(0),
+                        Code::ReturnValue,
+                    ),
+                    num_locals: 1,
+                    num_paras: 1,
+                }),
+                Code::Constant(Object::Int(1)),
+                Code::Call(1),
+                Code::Pop,
+            )),
         ];
         for (input, expected) in test_array.iter() {
             let lexer = Lexer::new(input);
             let parser = Parser::new(lexer);
-            let symbol_table = SymbolTable::new();
+            let symbol_table = SymbolTable::new(None);
             let compiler = Compiler::new(parser, symbol_table);
-            let (output, symbol_table) = compiler.run();
+            let (output, _symbol_table) = compiler.run();
             println!("Compiler: {:?} - {:?}", input, output);
             assert_eq!(expected, &output);
         }

@@ -3,6 +3,7 @@ use std::fmt;
 
 use crate::ast::Expression;
 use crate::ast::Statement;
+use crate::code::Code;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Object {
@@ -16,6 +17,11 @@ pub enum Object {
         parameters: Vec<Box<Expression>>,
         body: Box<Statement>,
         env: Environment,
+    },
+    CompiledFunction {
+        instructions: Vec<Code>,
+        num_locals: usize,
+        num_paras: usize,
     },
 }
 
@@ -42,6 +48,7 @@ impl fmt::Display for Object {
                 body: _,
                 env: _,
             } => write!(f, "function"),
+            Object::CompiledFunction { instructions: _, num_locals: _, num_paras: _ } => write!(f, "compiled function"),
         }
     }
 }
